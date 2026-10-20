@@ -44,6 +44,19 @@ def make_trigger(t):
     mode = t.get("mode", "daily")
     if mode == "window":
         return window_trigger(t)
+    if mode == "at":
+        days = ",".join(d for d in t.get("days") or [] if d in DAYS) or None
+        dom = int(t.get("dom") or 0)
+        trigs = []
+        for hhmm in t.get("times") or ["02:00"]:
+            h, m = hhmm.split(":")
+            kw = {"hour": int(h), "minute": int(m)}
+            if dom:
+                kw["day"] = dom
+            elif days:
+                kw["day_of_week"] = days
+            trigs.append(CronTrigger(**kw))
+        return OrTrigger(trigs) if len(trigs) > 1 else trigs[0]
     hh, mm = (t.get("time") or "02:00").split(":")
     if mode == "interval":
         every = max(1, int(t.get("every") or 1))

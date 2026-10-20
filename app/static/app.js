@@ -26,6 +26,7 @@ const typeBadge = t => `<span class="badge b-${t === 'restore' ? 'restore' : t}"
 const statusBadge = s => s === 'success' ? '<span class="badge b-ok">✔ ناجح</span>' : s === 'failed' ? '<span class="badge b-bad">✖ فشل</span>' : '<span class="badge b-run"><i class="run-dot"></i> قيد التنفيذ</span>';
 function trigText(t) {
   const tm = t.time || '02:00';
+  if (t.mode === 'at') return `في ${(t.times || []).join('، ')} — ${t.dom ? 'يوم ' + t.dom + ' من كل شهر' : (t.days || []).length ? (t.days || []).map(d => DAYS.find(x => x[0] === d)?.[1]).join('، ') : 'كل يوم'}`;
   if (t.mode === 'window') return `كل ${t.every} ${t.unit === 'hours' ? 'ساعة' : 'دقيقة'} ضمن: ${(t.periods || []).map(p => p.from + '–' + p.to).join(' ، ')} (${(t.days || []).length && (t.days || []).length < 7 ? (t.days || []).map(d => DAYS.find(x => x[0] === d)?.[1]).join('، ') : 'كل الأيام'})`;
   if (t.mode === 'interval') return `كل ${t.every} ${{ minutes: 'دقيقة', hours: 'ساعة', days: 'يوم' }[t.unit]}`;
   if (t.mode === 'daily') return `يوميًا ${tm}`;
@@ -192,22 +193,40 @@ async function vSchedules() {
 }
 const runSched = guard(async id => { await api(`/schedules/${id}/run`, 'POST'); toast('بدأ التشغيل - تابع السجل'); });
 window.runSched = runSched;
+function normTrig(t) { // legacy modes -> the 3 UI modes (at / window / cron)
+  const x = { ...t };
+  if (x.mode === 'daily') return { mode: 'at', days: [], dom: 0, times: [x.time || '02:00'] };
+  if (x.mode === 'weekly') return { mode: 'at', days: x.days || [], dom: 0, times: [x.time || '02:00'] };
+  if (x.mode === 'monthly') return { mode: 'at', days: [], dom: x.day || 1, times: [x.time || '02:00'] };
+  if (x.mode === 'interval') { const mins = x.every * (x.unit === 'days' ? 1440 : x.unit === 'hours' ? 60 : 1); const h = mins % 60 === 0; return { mode: 'window', every: h ? mins / 60 : mins, unit: h ? 'hours' : 'minutes', days: [], periods: [{ from: '00:00', to: '23:59' }] }; }
+  return x;
+}
+const dayChips = sel => `<div class="chips">${DAYS.map(([k, v]) => `<span class="chip ${(sel || []).includes(k) ? 'on' : ''}" data-d="${k}" onclick="this.classList.toggle('on')">${v}</span>`).join('')}</div>`;
+const timeRow = v => `<div class="row" style="margin-bottom:6px"><input type="time" class="tTime" value="${v}" style="width:140px"><button type="button" class="btn bad sm" onclick="this.parentElement.remove()">✕</button></div>`;
+function addTime() { $('#times').insertAdjacentHTML('beforeend', timeRow('12:00')); }
+function daysMode() { const m = val('tDaysMode'); $('#tDaysWeek').classList.toggle('hidden', m !== 'week'); $('#tDaysMonth').classList.toggle('hidden', m !== 'month'); }
+window.addTime = addTime; window.daysMode = daysMode;
 function trigFields(t) {
-  const time = `<label class="f"><span>الوقت</span><input type="time" id="tTime" value="${t.time || '02:00'}"></label>`;
   const m = t.mode;
-  const dayChips = sel => `<div class="f"><span class="mut sm">الأيام (إن لم تختر شيئًا فكل الأيام)</span><div class="chips">${DAYS.map(([k, v]) => `<span class="chip ${(sel || []).includes(k) ? 'on' : ''}" data-d="${k}" onclick="this.classList.toggle('on')">${v}</span>`).join('')}</div></div>`;
+  if (m === 'at') {
+    const dm = t.dom ? 'month' : (t.days || []).length ? 'week' : 'all';
+    $('#tFields').innerHTML = `<div class="two"><div><label class="f"><span>في أي الأيام؟</span><select id="tDaysMode" onchange="daysMode()"><option value="all" ${dm === 'all' ? 'selected' : ''}>كل يوم</option><option value="week" ${dm === 'week' ? 'selected' : ''}>أيام محددة من الأسبوع</option><option value="month" ${dm === 'month' ? 'selected' : ''}>يوم محدد من الشهر</option></select></label>
+      <div id="tDaysWeek" class="hidden">${dayChips(t.days)}</div><div id="tDaysMonth" class="hidden"><label class="f"><span>يوم الشهر (1-28)</span><input type="number" id="tDom" min="1" max="28" value="${t.dom || 1}"></label></div></div>
+      <div class="f"><span class="mut sm">الأوقات (يمكن أكثر من وقت)</span><div id="times">${(t.times && t.times.length ? t.times : ['02:00']).map(timeRow).join('')}</div><button type="button" class="btn ghost sm" onclick="addTime()">＋ إضافة وقت</button></div></div>
+      <div class="mut sm">أمثلة: كل يوم الساعة 02:00 · الجمعة فقط 23:00 · أول كل شهر 03:00 · كل يوم 08:00 و12:00 و16:00</div>`;
+    daysMode(); return;
+  }
   if (m === 'window') {
     const per = (t.periods && t.periods.length) ? t.periods : [{ from: '07:00', to: '21:00' }];
     $('#tFields').innerHTML = `<div class="two"><label class="f"><span>كل</span><input type="number" id="tEvery" min="1" value="${t.every || 1}"></label><label class="f"><span>الوحدة</span><select id="tUnit"><option value="minutes" ${t.unit !== 'hours' ? 'selected' : ''}>دقيقة</option><option value="hours" ${t.unit === 'hours' ? 'selected' : ''}>ساعة</option></select></label></div>
-    ${dayChips(t.days)}<div class="f"><span class="mut sm">الفترات اليومية (من – إلى)، ويمكنك إضافة أكثر من فترة</span><div id="periods">${per.map(periodRow).join('')}</div><button type="button" class="btn ghost sm" onclick="addPeriod()">＋ إضافة فترة</button></div>
-    <div class="mut sm">مثال: كل 1 دقيقة، الأحد–الخميس، من 07:00 إلى 21:00. أو فترتان: 08:00–12:00 و16:00–20:00. ساعة النهاية تُنفَّذ أيضًا.</div>`;
+    <div class="f"><span class="mut sm">الأيام (إن لم تختر شيئًا فكل الأيام)</span>${dayChips(t.days)}</div>
+    <div class="f"><span class="mut sm">الفترات اليومية (من – إلى)، ويمكنك إضافة أكثر من فترة</span><div id="periods">${per.map(periodRow).join('')}</div><button type="button" class="btn ghost sm" onclick="addPeriod()">＋ إضافة فترة</button></div>
+    <div class="mut sm">أمثلة: كل 1 دقيقة، الأحد–الخميس، 07:00–21:00 · فترتان: 08:00–12:00 و16:00–20:00 · كل 6 ساعات طوال اليوم: 00:00–23:59. ساعة النهاية تُنفَّذ أيضًا.</div>`;
     return;
   }
-  $('#tFields').innerHTML = m === 'interval' ? `<div class="two"><label class="f"><span>كل</span><input type="number" id="tEvery" min="1" value="${t.every || 1}"></label><label class="f"><span>الوحدة</span><select id="tUnit">${[['minutes', 'دقيقة'], ['hours', 'ساعة'], ['days', 'يوم']].map(([k, v]) => `<option value="${k}" ${t.unit === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>`
-    : m === 'daily' ? time : m === 'weekly' ? `<div class="f"><span class="mut sm">الأيام</span><div class="chips">${DAYS.map(([k, v]) => `<span class="chip ${(t.days || ['sun']).includes(k) ? 'on' : ''}" data-d="${k}" onclick="this.classList.toggle('on')">${v}</span>`).join('')}</div></div>${time}`
-      : m === 'monthly' ? `<div class="two"><label class="f"><span>يوم الشهر</span><input type="number" id="tDay" min="1" max="28" value="${t.day || 1}"></label>${time}</div>`
-        : `<label class="f"><span>تعبير Cron (دقيقة ساعة يوم-بالشهر شهر يوم-بالأسبوع)</span><input type="text" id="tExpr" style="direction:ltr" value="${esc(t.expr || '0 2 * * *')}"></label>
-        <div class="mut sm" style="direction:ltr;text-align:left;line-height:1.9">*/15 * * * *  &rarr; every 15 min<br>0 2 * * *  &rarr; daily 02:00<br>0 3 * * fri  &rarr; every Friday 03:00<br>* 7-20 * * sun-thu  &rarr; every minute 07:00-20:59, Sun-Thu<br>0 8,12,16 * * *  &rarr; 08:00, 12:00, 16:00<br><b>Use day names (mon, tue, ... sun), not numbers.</b> الأسهل: استخدم «نافذة زمنية».</div>`;
+  $('#tFields').innerHTML = `<label class="f"><span>تعبير Cron (دقيقة ساعة يوم-بالشهر شهر يوم-بالأسبوع)</span><input type="text" id="tExpr" style="direction:ltr" value="${esc(t.expr || '0 2 * * *')}"></label>
+    <div class="mut sm" style="direction:ltr;text-align:left;line-height:1.9">*/15 * * * *  &rarr; every 15 min<br>0 2 * * *  &rarr; daily 02:00<br>0 3 * * fri  &rarr; every Friday 03:00<br>* 7-20 * * sun-thu  &rarr; every minute 07:00-20:59, Sun-Thu<br><b>Use day names (mon, tue, ... sun), not numbers.</b></div>
+    <div class="mut sm">للحالات العادية الأسهل استخدام «في أوقات محددة» أو «تكرار خلال نوافذ زمنية».</div>`;
 }
 const periodRow = p => `<div class="row" style="margin-bottom:6px"><span class="mut sm">من</span><input type="time" class="pFrom" value="${p.from}" style="width:130px"><span class="mut sm">إلى</span><input type="time" class="pTo" value="${p.to}" style="width:130px"><button type="button" class="btn bad sm" onclick="this.parentElement.remove()">✕</button></div>`;
 function addPeriod() { $('#periods').insertAdjacentHTML('beforeend', periodRow({ from: '08:00', to: '12:00' })); }
@@ -223,27 +242,33 @@ function readRet() {
 }
 window.retMode = retMode;
 function readTrig() {
-  const mode = document.querySelector('input[name=tMode]:checked').value, t = { mode };
-  if (mode === 'window') {
-    Object.assign(t, { every: +val('tEvery'), unit: val('tUnit'), days: [...document.querySelectorAll('#tFields .chip.on')].map(c => c.dataset.d), periods: [...document.querySelectorAll('#periods .row')].map(r => ({ from: r.querySelector('.pFrom').value, to: r.querySelector('.pTo').value })) });
-    if (!t.periods.length || t.periods.some(p => !p.from || !p.to)) throw new Error('أضف فترة صحيحة (من - إلى)');
+  const mode = val('tMode');
+  if (mode === 'at') {
+    const times = [...document.querySelectorAll('#times .tTime')].map(i => i.value).filter(Boolean);
+    if (!times.length) throw new Error('أضف وقتًا واحدًا على الأقل');
+    const t = { mode: 'at', times, days: [], dom: 0 }, dm = val('tDaysMode');
+    if (dm === 'week') { t.days = [...document.querySelectorAll('#tDaysWeek .chip.on')].map(c => c.dataset.d); if (!t.days.length) throw new Error('اختر يومًا واحدًا على الأقل'); }
+    if (dm === 'month') t.dom = +val('tDom');
+    return t;
   }
-  if (mode === 'interval') Object.assign(t, { every: +val('tEvery'), unit: val('tUnit') });
-  if (mode === 'daily' || mode === 'weekly' || mode === 'monthly') t.time = val('tTime');
-  if (mode === 'weekly') { t.days = [...document.querySelectorAll('#tFields .chip.on')].map(c => c.dataset.d); if (!t.days.length) throw new Error('اختر يومًا واحدًا على الأقل'); }
-  if (mode === 'monthly') t.day = +val('tDay');
-  if (mode === 'cron') t.expr = val('tExpr');
-  return t;
+  if (mode === 'window') {
+    const t = { mode, every: +val('tEvery'), unit: val('tUnit'), days: [...document.querySelectorAll('#tFields .chip.on')].map(c => c.dataset.d), periods: [...document.querySelectorAll('#periods .row')].map(r => ({ from: r.querySelector('.pFrom').value, to: r.querySelector('.pTo').value })) };
+    if (!t.periods.length || t.periods.some(p => !p.from || !p.to)) throw new Error('أضف فترة صحيحة (من - إلى)');
+    return t;
+  }
+  return { mode: 'cron', expr: val('tExpr') };
 }
+
 function editSched(id) {
   const s = id ? cache.scheds.find(x => x.id === id) : { type: 'full', trigger: { mode: 'daily', time: '02:00' }, destinations: cache.dests.map(d => d.id), verify: true, enabled: true, retention: { daily: 7, weekly: 4, monthly: 6 }, databases: [] };
   if (!cache.conns.length) { toast('أضف اتصالًا أولًا', true); return; }
   const r = s.retention || {};
+  const tr = normTrig(s.trigger);
   const rm = r.chains > 0 ? 'chains' : r.keep_last > 0 ? 'keep_last' : (r.daily || r.weekly || r.monthly) ? 'gfs' : 'none';
   openModal(id ? 'تعديل جدول' : 'جدول جديد', `<label class="f"><span>اسم الجدول</span><input type="text" id="sName" value="${esc(s.name)}" placeholder="مثال: Full أسبوعي"></label>
   <label class="f"><span>الاتصال</span><select id="sConn" onchange="loadDbChips('s')">${cache.conns.map(c => `<option value="${c.id}" ${c.id === s.connection_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>${dbPicker('s')}
   <div class="f"><span class="mut sm">نوع النسخة</span><div class="seg" style="margin:4px 0 0">${Object.entries(TYPES).map(([k, v]) => `<label><input type="radio" name="sType" value="${k}" ${s.type === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div><div class="mut sm">التفاضلية والسجل تحتاج نسخة كاملة سابقة، والسجل يتطلب Recovery Model = Full</div></div>
-  <div class="f"><span class="mut sm">متى؟</span><div class="seg" style="margin:4px 0 0">${[['window', 'نافذة زمنية'], ['interval', 'كل فترة'], ['daily', 'يوميًا'], ['weekly', 'أسبوعيًا'], ['monthly', 'شهريًا'], ['cron', 'Cron']].map(([k, v]) => `<label><input type="radio" name="tMode" value="${k}" ${s.trigger.mode === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div><div id="tFields"></div></div>
+  <div class="f"><label class="f"><span>طريقة التشغيل</span><select id="tMode" onchange="trigFields({ mode: this.value })"><option value="at" ${tr.mode === 'at' ? 'selected' : ''}>في أوقات محددة (مثلًا يوميًا الساعة 2 ص)</option><option value="window" ${tr.mode === 'window' ? 'selected' : ''}>تكرار كل فترة خلال نوافذ زمنية (مثلًا كل دقيقة من 7ص إلى 9م)</option><option value="cron" ${tr.mode === 'cron' ? 'selected' : ''}>Cron (متقدم)</option></select></label><div id="tFields"></div></div>
   <div class="f"><span class="mut sm">الوجهات الإضافية</span><br>${cache.dests.map(d => `<label class="chk"><input type="checkbox" class="sDest" value="${d.id}" ${(s.destinations || []).includes(d.id) ? 'checked' : ''}>${esc(d.name)}</label>`).join('') || '<span class="mut sm">لا توجد (النسخ تُحفظ محليًا فقط)</span>'}</div>
   <div class="f"><span class="mut sm">الحذف التلقائي للنسخ القديمة (تُطبَّق سياسة واحدة فقط لكل جدول)</span>
   <select id="rMode" onchange="retMode()"><option value="none" ${rm === 'none' ? 'selected' : ''}>بدون حذف تلقائي</option><option value="keep_last" ${rm === 'keep_last' ? 'selected' : ''}>الاحتفاظ بآخر N نسخة من هذا الجدول (مناسب للتفاضلي)</option><option value="chains" ${rm === 'chains' ? 'selected' : ''}>سلاسل: آخر N نسخة Full مع تفاضلياتها (لجدول الـ Full)</option><option value="gfs" ${rm === 'gfs' ? 'selected' : ''}>يومي / أسبوعي / شهري</option></select>
@@ -256,7 +281,7 @@ function editSched(id) {
       await api(id ? `/schedules/${id}` : '/schedules', id ? 'PUT' : 'POST', { name: val('sName'), connection_id: +val('sConn'), databases: dbs, type: document.querySelector('input[name=sType]:checked').value, trigger: readTrig(), destinations: [...document.querySelectorAll('.sDest:checked')].map(x => +x.value), retention: readRet(), verify: chk('sVerify'), enabled: chk('sEn') });
       closeModal(); route();
     }], ['إلغاء', 'ghost', closeModal]]);
-  retMode(); trigFields(s.trigger); document.querySelectorAll('input[name=tMode]').forEach(r => r.onchange = () => trigFields({ mode: r.value }));
+  retMode(); trigFields(tr);
   loadDbChips('s', s.databases);
 }
 window.editSched = editSched;
