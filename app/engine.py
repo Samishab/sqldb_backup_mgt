@@ -275,16 +275,22 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
                 log(f"فشل الرفع إلى {d['name']}: {e}")
         if any(u["status"] == "failed" for u in uploads):
             err = "فشل الرفع إلى: " + "، ".join(u["name"] for u in uploads if u["status"] == "failed")
-        try:
-            apply_retention(conn_id, dbname, btype, retention or {}, log)
-        except Exception as e:  # noqa: BLE001
-            log(f"تحذير - تنظيف النسخ القديمة: {e}")
     except Exception as e:  # noqa: BLE001
         err = str(e)
         log(f"خطأ: {e}")
     status = "failed" if err else "success"
     db.x("UPDATE runs SET status=?, finished=?, error=?, uploads=? WHERE id=?",
          (status, db.now(), err, json.dumps(uploads, ensure_ascii=False), rid))
+    if not err:  # retention runs after this run is marked successful so it counts as the newest
+        try:
+            ret = retention or {}
+            if int(ret.get("chains") or 0) > 0:
+                if btype == "full":
+                    apply_chain_retention(conn_id, dbname, int(ret["chains"]), log)
+            else:
+                apply_retention(conn_id, dbname, btype, ret, log)
+        except Exception as e:  # noqa: BLE001
+            log(f"تحذير - تنظيف النسخ القديمة: {e}")
     title = f"{'✅' if not err else '❌'} نسخ احتياطي {dbname} ({btype})"
     alerts.notify(title, err or f"نجحت النسخة - {size / 1048576:.1f} MB", not err)
 
@@ -319,6 +325,22 @@ def apply_retention(conn_id, dbname, btype, ret, log=print):
             delete_run_files(r, log)
             db.x("UPDATE runs SET deleted=1 WHERE id=?", (r["id"],))
             log(f"حُذفت نسخة قديمة: {Path(r['file']).name}")
+
+
+def apply_chain_retention(conn_id, dbname, keep, log=print):
+    """Keep the newest `keep` full backups and everything (diff/log) after the oldest kept full.
+    Anything older - old fulls together with their diff/log chains - is deleted."""
+    fulls = db.q("SELECT started FROM runs WHERE connection_id=? AND db=? AND type='full' AND status='success' "
+                 "AND deleted=0 ORDER BY started DESC", (conn_id, dbname))
+    if len(fulls) <= max(keep, 1):
+        return
+    cutoff = fulls[max(keep, 1) - 1]["started"]
+    old = db.q("SELECT * FROM runs WHERE connection_id=? AND db=? AND type IN ('full','diff','log') "
+               "AND status='success' AND deleted=0 AND started < ?", (conn_id, dbname, cutoff))
+    for r in old:
+        delete_run_files(r, log)
+        db.x("UPDATE runs SET deleted=1 WHERE id=?", (r["id"],))
+    log(f"حُذفت {len(old)} نسخة من السلاسل القديمة (يُحتفظ بآخر {keep} سلاسل)")
 
 
 def delete_run_files(r, log=print):

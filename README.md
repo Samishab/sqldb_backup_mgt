@@ -20,6 +20,19 @@ run.bat
 ثم افتح `http://localhost:8765` وعيّن كلمة المرور. يحتاج Python **3.12 أو 3.13** (الإصدارات الأحدث ليس لها حزم جاهزة لـ pyodbc)
 و ODBC Driver لـ SQL Server. تفاصيل النشر الكاملة في [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+## تشغيل اللوحة كخدمة ويندوز (تعمل بعد إعادة التشغيل)
+باستخدام [NSSM](https://nssm.cc/download) (ضع `nssm.exe` في `tools\`):
+```
+nssm install BackupHub "D:\DB_BU_CP\.venv\Scripts\python.exe" "-m uvicorn app.main:app --host 0.0.0.0 --port 8765"
+nssm set BackupHub AppDirectory D:\DB_BU_CP
+nssm set BackupHub Start SERVICE_AUTO_START
+nssm set BackupHub AppStdout D:\DB_BU_CP\data\service.log
+nssm set BackupHub AppStderr D:\DB_BU_CP\data\service.log
+nssm start BackupHub
+```
+ثم من `services.msc` ← BackupHub ← Log On اختر الحساب الذي يملك صلاحية على مجلد المشروع ومجلد النسخ.
+التفاصيل والأخطاء الشائعة في [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). لإيقافها/حذفها: `nssm stop BackupHub` / `nssm remove BackupHub confirm`.
+
 ## تجربة بدون قاعدة حقيقية
 - `setup_demo.py`: ينشئ قاعدة `DemoShop` على `localhost\SQLEXPRESS` + اتصال + 3 جداول سريعة للتجربة.
 - `demo_activity.py`: يضيف صفوفًا كل 10 ثوانٍ ليكون للتفاضلي والسجل ما ينسخانه.
