@@ -18,6 +18,7 @@ DEFAULT_SETTINGS = {
     "stale_hours": "36",
     "notify_on": "failure",  # failure | all | none
     "rclone_path": "rclone",
+    "promote_foreign_full": "1",
     "telegram_token": "", "telegram_chat": "",
     "smtp_host": "", "smtp_port": "587", "smtp_user": "", "smtp_pass": "",
     "smtp_from": "", "smtp_to": "", "smtp_tls": "1",

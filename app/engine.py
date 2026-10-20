@@ -235,6 +235,19 @@ def start_run(conn_id, dbname, btype, dest_ids, verify, retention, schedule=None
     return rid
 
 
+def last_full_is_foreign(cfg, dbname):
+    """True when the newest non-copy-only full on the server was not written by the panel (another tool or a manual
+    backup). Such a full becomes the base of every later differential, which then cannot be restored from our files."""
+    rows = sql_rows(cfg, "SELECT TOP 1 mf.physical_device_name AS p FROM msdb.dbo.backupset bs "
+                         "JOIN msdb.dbo.backupmediafamily mf ON mf.media_set_id=bs.media_set_id "
+                         f"WHERE bs.database_name={ql(dbname)} AND bs.type='D' AND bs.is_copy_only=0 "
+                         "ORDER BY bs.backup_finish_date DESC")
+    if not rows:
+        return False
+    root = str(Path(db.get_setting("backup_dir"))).lower().rstrip("\\/")
+    return not str(rows[0]["p"]).lower().startswith(root)
+
+
 def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
     lines = []
 
@@ -244,11 +257,21 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
 
     cfg = db.get_item("connections", conn_id)
     uploads, size, path, err = [], 0, None, None
+    sched_type = btype  # retention follows the schedule's type even if a diff was promoted to a full
     lock = _locks.setdefault(conn_id, threading.Lock())
     try:
         if not cfg:
             raise RuntimeError("الاتصال محذوف")
         with lock:
+            if btype == "diff" and cfg["type"] == "sqlserver" and db.get_setting("promote_foreign_full") == "1":
+                try:
+                    if last_full_is_foreign(cfg, dbname):
+                        btype = "full"
+                        db.x("UPDATE runs SET type='full' WHERE id=?", (rid,))
+                        log("آخر Full على القاعدة أُخذت من خارج اللوحة، فتُحوَّل هذه التفاضلية إلى Full "
+                            "حتى تبقى السلسلة قابلة للاسترجاع")
+                except Exception as e:  # noqa: BLE001 - e.g. no read access to msdb; carry on with a differential
+                    log(f"تعذر فحص آخر Full ({e}); المتابعة بتفاضلية")
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             rel = f"{safe(dbname)}/{safe(dbname)}_{btype}_{stamp}{EXT.get(cfg['type'], '.bak')}"
             path = Path(db.get_setting("backup_dir")) / rel
@@ -285,10 +308,10 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
         try:
             ret = retention or {}
             if int(ret.get("chains") or 0) > 0:
-                if btype == "full":
+                if sched_type == "full":
                     apply_chain_retention(conn_id, dbname, int(ret["chains"]), log)
             else:
-                apply_retention(conn_id, dbname, btype, ret, log)
+                apply_retention(conn_id, dbname, sched_type, ret, log)
         except Exception as e:  # noqa: BLE001
             log(f"تحذير - تنظيف النسخ القديمة: {e}")
     title = f"{'✅' if not err else '❌'} نسخ احتياطي {dbname} ({btype})"

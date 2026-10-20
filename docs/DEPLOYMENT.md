@@ -118,3 +118,16 @@ nssm restart BackupHub
 - الرفع على Google Drive عبر rclone (وجهة من نوع rclone؛ للتشفير استخدم remote من نوع crypt).
 - اختيار اتصال آخر هدفًا للاسترجاع (لاختبار الاسترجاع على SQL Server في جهاز النسخ بدل الإنتاج).
 - تنبيه إذا توقفت اللوحة نفسها (مراقبة خارجية).
+
+## نسخ Full من أداة أخرى (خطأ 3136)
+أي نسخة Full غير `COPY_ONLY` على القاعدة (برنامج المنشأة نفسه، أو SSMS) تصبح أساس كل التفاضليات بعدها، فلا تُستعاد من ملفات اللوحة وحدها (الخطأ 3136).
+- الاسترجاع يقرأ `RESTORE HEADERONLY` ويطابق `DifferentialBaseGUID` بـ `BackupSetGUID` لاختيار الـ Full الصحيح.
+- الإعدادات ← «حوّل التفاضلية تلقائيًا إلى Full…» (مفعّل افتراضيًا): قبل كل تفاضلية تفحص اللوحة `msdb.dbo.backupset`، وإن كان آخر Full من خارجها أخذت Full بدلًا منها. يحتاج `backup_app` قراءة msdb:
+  ```sql
+  USE msdb;
+  CREATE USER backup_app FOR LOGIN backup_app;
+  GRANT SELECT ON dbo.backupset TO backup_app;
+  GRANT SELECT ON dbo.backupmediafamily TO backup_app;
+  ```
+  وإن لم تتوفر الصلاحية يُسجَّل تحذير وتستمر النسخة كتفاضلية.
+- الأمتن: نسخ **Log** (Recovery FULL) لأن Full الغريب لا يكسر سلسلة السجل (ما لم تأخذ الأداة الأخرى نسخ Log أيضًا).
