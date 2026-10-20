@@ -297,6 +297,15 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
 
 # ---------------------------------------------------------------- retention
 def apply_retention(conn_id, dbname, btype, ret, log=print):
+    keep_last = int(ret.get("keep_last") or 0)
+    if keep_last > 0:  # simplest policy: keep only the newest N successful backups of this schedule's type
+        rows = db.q("SELECT * FROM runs WHERE connection_id=? AND db=? AND type=? AND status='success' AND deleted=0 "
+                    "ORDER BY started DESC", (conn_id, dbname, btype))
+        for r in rows[keep_last:]:
+            delete_run_files(r, log)
+            db.x("UPDATE runs SET deleted=1 WHERE id=?", (r["id"],))
+            log(f"حُذفت نسخة قديمة: {Path(r['file']).name}")
+        return
     d, w, m = int(ret.get("daily") or 0), int(ret.get("weekly") or 0), int(ret.get("monthly") or 0)
     if not (d or w or m):
         return

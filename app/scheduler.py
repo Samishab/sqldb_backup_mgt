@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -10,8 +11,39 @@ sched = BackgroundScheduler()
 DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 
+def _mins(hhmm):
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def window_trigger(t):
+    """Run every N minutes/hours inside one or more daily periods, on chosen weekdays (none = every day).
+    A period whose end is before its start is split at midnight."""
+    days = ",".join(d for d in t.get("days") or [] if d in DAYS) or None
+    step = max(1, int(t.get("every") or 1))
+    step_min = step * 60 if t.get("unit") == "hours" else step
+    trigs = []
+    for p in t.get("periods") or [{"from": "00:00", "to": "23:59"}]:
+        a, b = _mins(p["from"]), _mins(p["to"])
+        for lo, hi in ([(a, b)] if a <= b else [(a, 1439), (0, b)]):
+            by_hour, m = {}, lo
+            while m <= hi:
+                by_hour.setdefault(m // 60, []).append(m % 60)
+                m += step_min
+            for h, mins in by_hour.items():
+                kw = {"hour": h, "minute": ",".join(map(str, mins))}
+                if days:
+                    kw["day_of_week"] = days
+                trigs.append(CronTrigger(**kw))
+    if not trigs:
+        raise ValueError("no periods")
+    return OrTrigger(trigs)
+
+
 def make_trigger(t):
     mode = t.get("mode", "daily")
+    if mode == "window":
+        return window_trigger(t)
     hh, mm = (t.get("time") or "02:00").split(":")
     if mode == "interval":
         every = max(1, int(t.get("every") or 1))

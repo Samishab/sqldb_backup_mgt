@@ -88,6 +88,32 @@ icacls "C:\Program Files\Python312" /grant "sqlbackup:(OI)(CI)RX"
 - مثال Cron: كل دقيقة 7ص–9م: `* 7-20 * * *` ثم أضف جدولًا ثانيًا `0 21 * * *` لنسخة الساعة 9م.
 - الاحتفاظ بالسلاسل يُطبَّق عند نجاح نسخة Full: يُبقي آخر N نسخ كاملة وكل ما بعد أقدمها، ويحذف ما قبلها.
 
+## التحديث من GitHub
+أول مرة على جهاز يحتوي المشروع (منسوخًا يدويًا) دون حذف `data` و`.venv` (مستثنيان من Git):
+```
+cd /d D:\DB_BU_CP
+git init -b main
+git remote add origin https://github.com/Samishab/sqldb_backup_mgt.git
+git fetch origin
+git reset --hard origin/main
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+nssm restart BackupHub
+```
+لأي تحديث لاحق:
+```
+cd /d D:\DB_BU_CP
+git pull
+nssm restart BackupHub
+```
+إذا ظهر `dubious ownership`: `git config --global --add safe.directory D:/DB_BU_CP`. ويحتاج الجهاز إلى Git (https://git-scm.com/download/win)،
+أو نزّل ZIP من صفحة المستودع (Code ← Download ZIP) وانسخ مجلد `app` فوق القديم.
+
+## تغيير Recovery Model إلى FULL
+`ALTER DATABASE ... SET RECOVERY FULL` تغيير فوري ولا يوقف القاعدة ولا يقطع الاتصالات ولا يحتاج إعادة تشغيل. لكن:
+- لا تبدأ سلسلة السجل إلا بعد أول **نسخة Full** بعد التحويل.
+- بدون نسخ Log منتظم يكبر ملف `.ldf` بلا حد.
+- إذا كان عند الجهة برنامج نسخ آخر: نسخ Full غير `COPY_ONLY` تعيد قاعدة التفاضلي، ونسخ Log من أكثر من أداة تشتّت السلسلة (يلزم كل الملفات للاسترجاع). اجعل أداة واحدة فقط مسؤولة عن نسخ Log.
+
 ## المتبقي / أفكار
 - الرفع على Google Drive عبر rclone (وجهة من نوع rclone؛ للتشفير استخدم remote من نوع crypt).
 - اختيار اتصال آخر هدفًا للاسترجاع (لاختبار الاسترجاع على SQL Server في جهاز النسخ بدل الإنتاج).
