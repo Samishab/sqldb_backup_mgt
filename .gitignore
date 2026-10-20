@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+# runtime data: control-panel DB holds connection passwords and the admin hash - never commit
+data/
+tools/
+*.log
+*.bak
