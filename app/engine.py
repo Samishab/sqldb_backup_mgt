@@ -366,7 +366,17 @@ def delete_run_files(r, log=print):
 
 
 # ---------------------------------------------------------------- restore
-def build_chain(target):
+def _base_full_for_diff(cfg, diff, fulls):
+    """The full backup a differential was really taken on: its DifferentialBaseGUID equals the full's BackupSetGUID.
+    Time order is not enough - a full taken by another tool in between becomes the new base."""
+    want = str(sql_rows(cfg, f"RESTORE HEADERONLY FROM DISK={ql(diff['file'])}")[0].get("DifferentialBaseGUID") or "").lower()
+    for f in list(reversed(fulls))[:30]:  # newest first
+        if str(sql_rows(cfg, f"RESTORE HEADERONLY FROM DISK={ql(f['file'])}")[0]["BackupSetGUID"]).lower() == want:
+            return f
+    return None
+
+
+def build_chain(target, cfg=None):
     runs = db.q("SELECT * FROM runs WHERE connection_id=? AND db=? AND status='success' AND deleted=0 "
                 "ORDER BY started", (target["connection_id"], target["db"]))
     runs = [r for r in runs if r["file"] and Path(r["file"]).exists()]
@@ -375,13 +385,22 @@ def build_chain(target):
     fulls = [r for r in runs if r["type"] == "full" and r["started"] <= target["started"]]
     if not fulls:
         raise RuntimeError("لا توجد نسخة كاملة سابقة لهذه النسخة")
-    base = fulls[-1]
     if target["type"] == "diff":
+        base = _base_full_for_diff(cfg, target, fulls) if cfg else fulls[-1]
+        if base is None:
+            raise RuntimeError("هذه التفاضلية مبنية على نسخة Full غير موجودة بين نسخ اللوحة (أُخذت بأداة أخرى أو "
+                               "حُذفت). لا يمكن استرجاعها من نسخ اللوحة. استخدم نسخة Full بعدها أو جدولها من جديد.")
         return [base, target]
-    diffs = [r for r in runs if r["type"] == "diff" and base["started"] <= r["started"] <= target["started"]]
-    start = diffs[-1] if diffs else base
+    # log target: use the newest differential only if its real base full is available, else fall back to full + logs
+    base, d = fulls[-1], None
+    diffs = [r for r in runs if r["type"] == "diff" and r["started"] <= target["started"]]
+    if diffs and cfg:
+        b = _base_full_for_diff(cfg, diffs[-1], fulls)
+        if b is not None:
+            base, d = b, diffs[-1]
+    start = d or base
     logs = [r for r in runs if r["type"] == "log" and start["started"] < r["started"] <= target["started"]]
-    return [base] + ([diffs[-1]] if diffs else []) + logs
+    return [base] + ([d] if d else []) + logs
 
 
 def start_restore(run_id, new_name, test):
@@ -405,7 +424,7 @@ def _restore(rid, target, new_name, test):
             raise RuntimeError("الاسترجاع من الواجهة مدعوم لـ SQL Server فقط حاليًا")
         if sql_rows(cfg, f"SELECT DB_ID({ql(new_name)}) AS i")[0]["i"] is not None:
             raise RuntimeError(f"القاعدة {new_name} موجودة مسبقًا - اختر اسمًا جديدًا (لا نكتب فوق القواعد الحالية)")
-        chain = build_chain(target)
+        chain = build_chain(target, cfg)
         log("سلسلة الاسترجاع: " + " ← ".join(f"{c['type']}@{c['started']}" for c in chain))
         info = sql_rows(cfg, "SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(500)) AS d, "
                              "CAST(SERVERPROPERTY('InstanceDefaultLogPath') AS NVARCHAR(500)) AS l")[0]
