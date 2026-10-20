@@ -441,7 +441,7 @@ def _restore(rid, target, new_name, test):
         lines.append(f"[{datetime.now():%H:%M:%S}] {msg}")
         db.x("UPDATE runs SET log=? WHERE id=?", ("\n".join(lines), rid))
 
-    err, cfg = None, db.get_item("connections", target["connection_id"])
+    err, cfg, partial = None, db.get_item("connections", target["connection_id"]), False
     try:
         if cfg["type"] != "sqlserver":
             raise RuntimeError("الاسترجاع من الواجهة مدعوم لـ SQL Server فقط حاليًا")
@@ -458,12 +458,14 @@ def _restore(rid, target, new_name, test):
             folder = info["l"] if isl else info["d"]
             ext = ".ldf" if isl else (".mdf" if i == 0 else ".ndf")
             moves.append(f"MOVE {ql(f['LogicalName'])} TO {ql(os.path.join(folder, f'{new_name}_{i}{ext}'))}")
+        partial = True  # from here a failure leaves a half-restored database that we created and must remove
         for i, c in enumerate(chain):
             last = i == len(chain) - 1
             kind = "LOG" if c["type"] == "log" else "DATABASE"
             opts = ([", ".join(moves)] if i == 0 else []) + ["RECOVERY" if last else "NORECOVERY"]
             log(f"استرجاع {c['type']} - {Path(c['file']).name}")
             sql_exec(cfg, f"RESTORE {kind} {qn(new_name)} FROM DISK={ql(c['file'])} WITH {', '.join(opts)}")
+        partial = False
         log("تم الاسترجاع ✔")
         if test:
             try:
@@ -478,6 +480,12 @@ def _restore(rid, target, new_name, test):
     except Exception as e:  # noqa: BLE001
         err = str(e)
         log(f"خطأ: {e}")
+        if partial:
+            try:
+                sql_exec(cfg, f"DROP DATABASE {qn(new_name)}")
+                log("حُذفت القاعدة نصف المسترجعة")
+            except Exception as e2:  # noqa: BLE001
+                log(f"تعذر حذف القاعدة نصف المسترجعة {new_name} - احذفها يدويًا: {e2}")
     db.x("UPDATE runs SET status=?, finished=?, error=? WHERE id=?",
          ("failed" if err else "success", db.now(), err, rid))
     if err:
