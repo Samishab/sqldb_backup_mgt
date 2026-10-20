@@ -212,6 +212,16 @@ function trigFields(t) {
 const periodRow = p => `<div class="row" style="margin-bottom:6px"><span class="mut sm">من</span><input type="time" class="pFrom" value="${p.from}" style="width:130px"><span class="mut sm">إلى</span><input type="time" class="pTo" value="${p.to}" style="width:130px"><button type="button" class="btn bad sm" onclick="this.parentElement.remove()">✕</button></div>`;
 function addPeriod() { $('#periods').insertAdjacentHTML('beforeend', periodRow({ from: '08:00', to: '12:00' })); }
 window.addPeriod = addPeriod;
+function retMode() { const m = val('rMode'); ['keep_last', 'chains', 'gfs'].forEach(k => $('#rb_' + k).classList.toggle('hidden', k !== m)); }
+function readRet() {
+  const m = val('rMode'), o = { chains: 0, keep_last: 0, daily: 0, weekly: 0, monthly: 0 };
+  if (m === 'keep_last') o.keep_last = +val('rK');
+  if (m === 'chains') o.chains = +val('rC');
+  if (m === 'gfs') Object.assign(o, { daily: +val('rD'), weekly: +val('rW'), monthly: +val('rM') });
+  if (m !== 'none' && !Object.values(o).some(v => v > 0)) throw new Error('أدخل قيمة أكبر من صفر لسياسة الحذف');
+  return o;
+}
+window.retMode = retMode;
 function readTrig() {
   const mode = document.querySelector('input[name=tMode]:checked').value, t = { mode };
   if (mode === 'window') {
@@ -229,22 +239,24 @@ function editSched(id) {
   const s = id ? cache.scheds.find(x => x.id === id) : { type: 'full', trigger: { mode: 'daily', time: '02:00' }, destinations: cache.dests.map(d => d.id), verify: true, enabled: true, retention: { daily: 7, weekly: 4, monthly: 6 }, databases: [] };
   if (!cache.conns.length) { toast('أضف اتصالًا أولًا', true); return; }
   const r = s.retention || {};
+  const rm = r.chains > 0 ? 'chains' : r.keep_last > 0 ? 'keep_last' : (r.daily || r.weekly || r.monthly) ? 'gfs' : 'none';
   openModal(id ? 'تعديل جدول' : 'جدول جديد', `<label class="f"><span>اسم الجدول</span><input type="text" id="sName" value="${esc(s.name)}" placeholder="مثال: Full أسبوعي"></label>
   <label class="f"><span>الاتصال</span><select id="sConn" onchange="loadDbChips('s')">${cache.conns.map(c => `<option value="${c.id}" ${c.id === s.connection_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>${dbPicker('s')}
   <div class="f"><span class="mut sm">نوع النسخة</span><div class="seg" style="margin:4px 0 0">${Object.entries(TYPES).map(([k, v]) => `<label><input type="radio" name="sType" value="${k}" ${s.type === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div><div class="mut sm">التفاضلية والسجل تحتاج نسخة كاملة سابقة، والسجل يتطلب Recovery Model = Full</div></div>
   <div class="f"><span class="mut sm">متى؟</span><div class="seg" style="margin:4px 0 0">${[['window', 'نافذة زمنية'], ['interval', 'كل فترة'], ['daily', 'يوميًا'], ['weekly', 'أسبوعيًا'], ['monthly', 'شهريًا'], ['cron', 'Cron']].map(([k, v]) => `<label><input type="radio" name="tMode" value="${k}" ${s.trigger.mode === k ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div><div id="tFields"></div></div>
   <div class="f"><span class="mut sm">الوجهات الإضافية</span><br>${cache.dests.map(d => `<label class="chk"><input type="checkbox" class="sDest" value="${d.id}" ${(s.destinations || []).includes(d.id) ? 'checked' : ''}>${esc(d.name)}</label>`).join('') || '<span class="mut sm">لا توجد (النسخ تُحفظ محليًا فقط)</span>'}</div>
-  <div class="f"><span class="mut sm">سياسة الاحتفاظ</span>
-  <label class="f"><span>⛓ الاحتفاظ بسلاسل (جدول الـ Full فقط): عدد السلاسل = نسخة Full + كل التفاضلية/السجل بعدها. عند ظهور Full جديد تُحذف الأقدم مع سلاسلها. (0 = استخدم النظام اليومي/الأسبوعي أدناه)</span><input type="number" min="0" id="rC" value="${r.chains ?? 0}"></label>
-  <label class="f"><span>🗂 الاحتفاظ بآخر عدد من النسخ فقط (مناسب للتفاضلي: مثلاً 3 = آخر تفاضلية + اثنتان احتياط). كل تفاضلية تحتاج الـ Full فقط وليس التي قبلها، فحذف القديم آمن. (0 = معطّل)</span><input type="number" min="0" id="rK" value="${r.keep_last ?? 0}"></label>
-  <span class="mut sm">أو نظام يومي/أسبوعي/شهري (0 = بدون) — للسجل: عدد الأيام فقط. اجعلها 0 في جداول التفاضلي والسجل عند استخدام السلاسل.</span><div class="two" style="grid-template-columns:repeat(3,1fr)"><label class="f"><span>يومي</span><input type="number" min="0" id="rD" value="${r.daily ?? 7}"></label><label class="f"><span>أسبوعي</span><input type="number" min="0" id="rW" value="${r.weekly ?? 4}"></label><label class="f"><span>شهري</span><input type="number" min="0" id="rM" value="${r.monthly ?? 6}"></label></div></div>
+  <div class="f"><span class="mut sm">الحذف التلقائي للنسخ القديمة (تُطبَّق سياسة واحدة فقط لكل جدول)</span>
+  <select id="rMode" onchange="retMode()"><option value="none" ${rm === 'none' ? 'selected' : ''}>بدون حذف تلقائي</option><option value="keep_last" ${rm === 'keep_last' ? 'selected' : ''}>الاحتفاظ بآخر N نسخة من هذا الجدول (مناسب للتفاضلي)</option><option value="chains" ${rm === 'chains' ? 'selected' : ''}>سلاسل: آخر N نسخة Full مع تفاضلياتها (لجدول الـ Full)</option><option value="gfs" ${rm === 'gfs' ? 'selected' : ''}>يومي / أسبوعي / شهري</option></select>
+  <div id="rb_keep_last" class="hidden" style="margin-top:8px"><label class="f"><span>عدد النسخ المحفوظة (الأحدث). كل تفاضلية تحتاج الـ Full فقط، فحذف القديمة آمن. تنبيه: مع نسخ كل دقيقة، 3 = آخر 3 دقائق.</span><input type="number" min="1" id="rK" value="${r.keep_last || 3}"></label></div>
+  <div id="rb_chains" class="hidden" style="margin-top:8px"><label class="f"><span>عدد السلاسل: نسخة Full + كل التفاضلية/السجل بعدها. عند نجاح Full جديد تُحذف الأقدم مع سلاسلها (يشمل ملفات التفاضلي والسجل الأقدم).</span><input type="number" min="1" id="rC" value="${r.chains || 2}"></label></div>
+  <div id="rb_gfs" class="hidden" style="margin-top:8px"><div class="two" style="grid-template-columns:repeat(3,1fr)"><label class="f"><span>أيام (نسخة لكل يوم)</span><input type="number" min="0" id="rD" value="${r.daily ?? 7}"></label><label class="f"><span>أسابيع</span><input type="number" min="0" id="rW" value="${r.weekly ?? 4}"></label><label class="f"><span>أشهر</span><input type="number" min="0" id="rM" value="${r.monthly ?? 6}"></label></div><div class="mut sm">يقرأ القيم الثلاث معًا ويحتفظ بأحدث نسخة في كل يوم/أسبوع/شهر ضمن المدى. للسجل: عدد الأيام فقط.</div></div></div>
   <label class="chk"><input type="checkbox" id="sVerify" ${s.verify !== false ? 'checked' : ''}> تحقق من النسخة بعد الإنشاء</label><label class="chk"><input type="checkbox" id="sEn" ${s.enabled !== false ? 'checked' : ''}> الجدول فعّال</label>`,
     [['حفظ', 'ok', async () => {
       const dbs = getDbs('s'); if (!val('sName') || !dbs.length) throw new Error('الاسم والقواعد مطلوبة');
-      await api(id ? `/schedules/${id}` : '/schedules', id ? 'PUT' : 'POST', { name: val('sName'), connection_id: +val('sConn'), databases: dbs, type: document.querySelector('input[name=sType]:checked').value, trigger: readTrig(), destinations: [...document.querySelectorAll('.sDest:checked')].map(x => +x.value), retention: { chains: +val('rC'), keep_last: +val('rK'), daily: +val('rD'), weekly: +val('rW'), monthly: +val('rM') }, verify: chk('sVerify'), enabled: chk('sEn') });
+      await api(id ? `/schedules/${id}` : '/schedules', id ? 'PUT' : 'POST', { name: val('sName'), connection_id: +val('sConn'), databases: dbs, type: document.querySelector('input[name=sType]:checked').value, trigger: readTrig(), destinations: [...document.querySelectorAll('.sDest:checked')].map(x => +x.value), retention: readRet(), verify: chk('sVerify'), enabled: chk('sEn') });
       closeModal(); route();
     }], ['إلغاء', 'ghost', closeModal]]);
-  trigFields(s.trigger); document.querySelectorAll('input[name=tMode]').forEach(r => r.onchange = () => trigFields({ mode: r.value }));
+  retMode(); trigFields(s.trigger); document.querySelectorAll('input[name=tMode]').forEach(r => r.onchange = () => trigFields({ mode: r.value }));
   loadDbChips('s', s.databases);
 }
 window.editSched = editSched;
