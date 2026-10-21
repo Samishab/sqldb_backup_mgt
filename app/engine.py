@@ -180,8 +180,14 @@ def _rclone(args, timeout=None):
     return r.stdout
 
 
+def _remote(dest):
+    """rclone remote with its colon: a bare "b2-crypt" would be treated as a local folder."""
+    r = dest["remote"].strip()
+    return r if ":" in r else r + ":"
+
+
 def _remote_name(dest, rel):
-    base = dest["remote"].rstrip("/")
+    base = _remote(dest).rstrip("/")
     return f"{base}/{rel}" if not base.endswith(":") else f"{base}{rel}"
 
 
@@ -216,10 +222,10 @@ def check_destination(dest):
         t.write_text("ok"); t.unlink()
         u = shutil.disk_usage(p)
         return {"ok": True, "info": f"متاح {u.free / 1e9:.1f} GB من {u.total / 1e9:.1f} GB", "free": u.free}
-    out = _rclone(["lsd", dest["remote"]], timeout=60)
+    out = _rclone(["lsd", _remote(dest)], timeout=60)
     free = ""
     try:
-        free = " | " + " ".join(_rclone(["about", dest["remote"]], timeout=60).split())
+        free = " | " + " ".join(_rclone(["about", _remote(dest)], timeout=60).split())
     except Exception:  # noqa: BLE001 - not every backend supports "about"
         pass
     return {"ok": True, "info": f"اتصال ناجح{free}"}
