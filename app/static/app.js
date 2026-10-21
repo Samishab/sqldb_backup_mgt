@@ -4,7 +4,7 @@ const TYPES = { full: 'كاملة', diff: 'تفاضلية', log: 'سجل الع�
 const CONN = { sqlserver: 'SQL Server', sqlite: 'SQLite', mysql: 'MySQL / MariaDB', postgres: 'PostgreSQL' };
 const DAYS = [['sun', 'الأحد'], ['mon', 'الإثنين'], ['tue', 'الثلاثاء'], ['wed', 'الأربعاء'], ['thu', 'الخميس'], ['fri', 'الجمعة'], ['sat', 'السبت']];
 const NAV = [['dashboard', '📊', 'الرئيسية'], ['schedules', '⏰', 'الجدولة'], ['connections', '🔌', 'الاتصالات'], ['destinations', '☁️', 'الوجهات'],
-['history', '📜', 'السجل'], ['restore', '♻️', 'الاسترجاع'], ['settings', '⚙️', 'الإعدادات'], ['audit', '🛡️', 'التدقيق']];
+['history', '📜', 'السجل'], ['restore', '♻️', 'الاسترجاع'], ['settings', '⚙️', 'الإعدادات'], ['audit', '🛡️', 'التدقيق'], ['help', '❓', 'دليل المساعدة']];
 let timer = null, cache = {};
 
 async function api(path, method = 'GET', body) {
@@ -60,7 +60,7 @@ const doLogin = guard(async configured => { await api(configured ? '/auth/login'
 const logout = guard(async () => { await api('/auth/logout', 'POST'); boot(); });
 window.addEventListener('hashchange', () => { if (!$('#app').classList.contains('hidden')) route(); });
 
-const VIEWS = { dashboard: vDashboard, schedules: vSchedules, connections: vConnections, destinations: vDestinations, history: vHistory, restore: vRestore, settings: vSettings, audit: vAudit };
+const VIEWS = { dashboard: vDashboard, schedules: vSchedules, connections: vConnections, destinations: vDestinations, history: vHistory, restore: vRestore, settings: vSettings, audit: vAudit, help: vHelp };
 async function route() {
   clearInterval(timer);
   const v = (location.hash.slice(1) || 'dashboard'); const fn = VIEWS[v] || vDashboard;
@@ -330,6 +330,9 @@ const testAlerts = guard(async () => { await saveSettings(); const r = await api
 const chPw = guard(async () => { await api('/auth/password', 'POST', { old: val('pwOld'), new: val('pwNew') }); toast('تم تغيير كلمة المرور'); });
 const cleanHistory = guard(async () => { await saveSettings(); const days = +val('st_history_days') || 30; if (!confirm(`حذف سجلات العمليات الأقدم من ${days} يومًا (الفاشلة والمحذوفة الملفات فقط)؟`)) return; const r = await api('/history/clean', 'POST', { days }); toast(`حُذف ${r.removed} سجل`); });
 Object.assign(window, { saveSettings, testAlerts, chPw, cleanHistory });
+
+// ---------- help
+function vHelp() { $('#view').innerHTML = window.HELP_HTML || 'الدليل غير متاح'; }
 
 // ---------- audit
 async function vAudit() {

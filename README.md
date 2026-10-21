@@ -33,6 +33,10 @@ nssm start BackupHub
 ثم من `services.msc` ← BackupHub ← Log On اختر الحساب الذي يملك صلاحية على مجلد المشروع ومجلد النسخ.
 التفاصيل والأخطاء الشائعة في [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). لإيقافها/حذفها: `nssm stop BackupHub` / `nssm remove BackupHub confirm`.
 
+## دليل المساعدة داخل اللوحة
+زر **❓ دليل المساعدة** في القائمة الجانبية يشرح كل شيء: أنواع النسخ، الجدولة، الحذف، الاسترجاع، الحماية، والأخطاء الشائعة وحلولها.
+الأدوات الخارجية الجاهزة (`nssm.exe` و`rclone.exe`) في مجلد `tools/` مع بصماتها في [tools/README.md](tools/README.md).
+
 ## تجربة بدون قاعدة حقيقية
 - `setup_demo.py`: ينشئ قاعدة `DemoShop` على `localhost\SQLEXPRESS` + اتصال + 3 جداول سريعة للتجربة.
 - `demo_activity.py`: يضيف صفوفًا كل 10 ثوانٍ ليكون للتفاضلي والسجل ما ينسخانه.

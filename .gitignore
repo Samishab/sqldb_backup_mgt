@@ -3,6 +3,15 @@ __pycache__/
 *.pyc
 # runtime data: control-panel DB holds connection passwords and the admin hash - never commit
 data/
-tools/
 *.log
 *.bak
+# never commit credential sheets
+*.xlsx
+private/
+# third-party tools: only the two executables are tracked (see tools/README.md)
+tools/*
+!tools/README.md
+!tools/nssm.exe
+!tools/rclone/
+tools/rclone/*
+!tools/rclone/rclone.exe

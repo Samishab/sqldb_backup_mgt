@@ -89,3 +89,11 @@ pre.log{background:#070b1d;border:1px solid var(--line);border-radius:12px;paddi
 .empty-state{text-align:center;padding:40px;color:var(--mut)}
 .days{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
 @media(max-width:860px){.app{flex-direction:column}.side{width:auto;height:auto;position:static;flex-direction:row;flex-wrap:wrap}nav{flex-direction:row;flex-wrap:wrap}.brand{margin:0}.two,.g2{grid-template-columns:1fr}main{padding:16px}}
+
+.help details{background:linear-gradient(160deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:14px;margin-bottom:10px;padding:0 16px}
+.help summary{cursor:pointer;padding:13px 0;font-weight:700;font-size:15px;list-style:none}
+.help summary::before{content:"▸ ";color:var(--pri2)}.help details[open] summary::before{content:"▾ "}
+.help details[open]{padding-bottom:12px}
+.help p,.help li{color:#cfd6f0}.help code{background:#0b1230;border:1px solid var(--line);border-radius:6px;padding:1px 6px;direction:ltr;unicode-bidi:embed;font-size:12px}
+.help pre{background:#070b1d;border:1px solid var(--line);border-radius:10px;padding:12px;direction:ltr;text-align:left;overflow:auto;font:12px/1.6 Consolas,monospace;white-space:pre-wrap}
+.help table{margin:8px 0}.help td,.help th{vertical-align:top}
