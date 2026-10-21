@@ -250,8 +250,9 @@ def last_full_is_foreign(cfg, dbname):
                          "ORDER BY bs.backup_finish_date DESC")
     if not rows:
         return False
-    root = str(Path(db.get_setting("backup_dir"))).lower().rstrip("\\/")
-    return not str(rows[0]["p"]).lower().startswith(root)
+    roots = {str(Path(db.get_setting("backup_dir"))).lower().rstrip("\\/")}
+    roots |= {str(Path(x["local_dir"])).lower().rstrip("\\/") for x in db.list_items("schedules") if x.get("local_dir")}
+    return not any(str(rows[0]["p"]).lower().startswith(r) for r in roots)
 
 
 def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
@@ -264,6 +265,9 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
     cfg = db.get_item("connections", conn_id)
     uploads, size, path, err = [], 0, None, None
     sched_type = btype  # retention follows the schedule's type even if a diff was promoted to a full
+    sid = (db.q("SELECT schedule_id FROM runs WHERE id=?", (rid,)) or [{}])[0].get("schedule_id")
+    sched_item = db.get_item("schedules", sid) if sid else None
+    base_dir = Path((sched_item or {}).get("local_dir") or db.get_setting("backup_dir"))
     lock = _locks.setdefault(conn_id, threading.Lock())
     try:
         if not cfg:
@@ -280,7 +284,7 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
                     log(f"تعذر فحص آخر Full ({e}); المتابعة بتفاضلية")
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             rel = f"{safe(dbname)}/{safe(dbname)}_{btype}_{stamp}{EXT.get(cfg['type'], '.bak')}"
-            path = Path(db.get_setting("backup_dir")) / rel
+            path = base_dir / rel
             log(f"بدء نسخة {btype} للقاعدة {dbname}")
             do_backup(cfg, dbname, btype, path, log)
             size = path.stat().st_size
@@ -315,9 +319,9 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
             ret = retention or {}
             if int(ret.get("chains") or 0) > 0:
                 if sched_type == "full":
-                    apply_chain_retention(conn_id, dbname, int(ret["chains"]), log)
+                    apply_chain_retention(conn_id, dbname, int(ret["chains"]), log, sid)
             else:
-                apply_retention(conn_id, dbname, sched_type, ret, log)
+                apply_retention(conn_id, dbname, sched_type, ret, log, sid)
         except Exception as e:  # noqa: BLE001
             log(f"تحذير - تنظيف النسخ القديمة: {e}")
     title = f"{'✅' if not err else '❌'} نسخ احتياطي {dbname} ({btype})"
@@ -325,11 +329,11 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
 
 
 # ---------------------------------------------------------------- retention
-def apply_retention(conn_id, dbname, btype, ret, log=print):
+def apply_retention(conn_id, dbname, btype, ret, log=print, sid=None):
     keep_last = int(ret.get("keep_last") or 0)
     if keep_last > 0:  # simplest policy: keep only the newest N successful backups of this schedule's type
         rows = db.q("SELECT * FROM runs WHERE connection_id=? AND db=? AND type=? AND status='success' AND deleted=0 "
-                    "ORDER BY started DESC", (conn_id, dbname, btype))
+                    "AND (? IS NULL OR schedule_id=?) ORDER BY started DESC", (conn_id, dbname, btype, sid, sid))
         for r in rows[keep_last:]:
             delete_run_files(r, log)
             db.x("UPDATE runs SET deleted=1 WHERE id=?", (r["id"],))
@@ -339,7 +343,7 @@ def apply_retention(conn_id, dbname, btype, ret, log=print):
     if not (d or w or m):
         return
     rows = db.q("SELECT * FROM runs WHERE connection_id=? AND db=? AND type=? AND status='success' AND deleted=0 "
-                "ORDER BY started DESC", (conn_id, dbname, btype))
+                "AND (? IS NULL OR schedule_id=?) ORDER BY started DESC", (conn_id, dbname, btype, sid, sid))
     if len(rows) < 2:
         return
     keep = {rows[0]["id"]}
@@ -365,11 +369,11 @@ def apply_retention(conn_id, dbname, btype, ret, log=print):
             log(f"حُذفت نسخة قديمة: {Path(r['file']).name}")
 
 
-def apply_chain_retention(conn_id, dbname, keep, log=print):
+def apply_chain_retention(conn_id, dbname, keep, log=print, sid=None):
     """Keep the newest `keep` full backups and everything (diff/log) after the oldest kept full.
     Anything older - old fulls together with their diff/log chains - is deleted."""
     fulls = db.q("SELECT started FROM runs WHERE connection_id=? AND db=? AND type='full' AND status='success' "
-                 "AND deleted=0 ORDER BY started DESC", (conn_id, dbname))
+                 "AND deleted=0 AND (? IS NULL OR schedule_id=?) ORDER BY started DESC", (conn_id, dbname, sid, sid))
     if len(fulls) <= max(keep, 1):
         return
     cutoff = fulls[max(keep, 1) - 1]["started"]
