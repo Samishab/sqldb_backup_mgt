@@ -379,7 +379,9 @@ def delete_run_files(r, log=print):
     for u in json.loads(r.get("uploads") or "[]"):
         if u.get("status") == "ok":
             d = db.get_item("destinations", u["dest_id"])
-            if d:
+            if d and d.get("no_delete"):
+                log(f"تخطي الحذف من {u['name']} (الحذف مُعطّل لهذه الوجهة - يتولاه المخزن)")
+            elif d:
                 try:
                     remove_remote(d, u["path"])
                 except Exception as e:  # noqa: BLE001
