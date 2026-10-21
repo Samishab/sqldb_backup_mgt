@@ -117,6 +117,20 @@ def stale_report():
     return out
 
 
+def clean_history(force_days=None):
+    """Delete old run-log rows. Rows that still point to a live backup file are kept (restore and retention need
+    them); only deleted-file entries, failed runs and restore logs older than the limit are removed."""
+    days = int(force_days if force_days is not None else (db.get_setting("history_days") or 0))
+    if days <= 0:
+        return 0
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    where = "started < ? AND (deleted=1 OR status='failed' OR type='restore')"
+    n = db.q(f"SELECT COUNT(*) AS n FROM runs WHERE {where}", (cutoff,))[0]["n"]
+    if n:
+        db.x(f"DELETE FROM runs WHERE {where}", (cutoff,))
+    return n
+
+
 def watchdog():
     stale = stale_report()
     key = datetime.now().strftime("%Y-%m-%d")
@@ -128,4 +142,5 @@ def watchdog():
 def start():
     sched.start()
     sync()
+    sched.add_job(clean_history, CronTrigger(hour=3, minute=30), id="history", misfire_grace_time=3600)
     sched.add_job(watchdog, IntervalTrigger(minutes=30), id="watchdog", next_run_time=datetime.now() + timedelta(minutes=2))

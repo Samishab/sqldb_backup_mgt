@@ -234,6 +234,13 @@ def restore(id_: int, body: dict = Body(...)):
     return {"run": engine.start_restore(id_, name, bool(body.get("test")))}
 
 
+@app.post("/api/history/clean")
+def history_clean(body: dict = Body(default={})):
+    n = scheduler.clean_history(int(body["days"]) if body.get("days") else None)
+    db.audit("history_clean", f"{n} rows")
+    return {"removed": n}
+
+
 # ------------------------------------------------------------------ settings / audit
 @app.get("/api/settings")
 def get_settings():
