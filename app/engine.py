@@ -241,6 +241,28 @@ def start_run(conn_id, dbname, btype, dest_ids, verify, retention, schedule=None
     return rid
 
 
+def _latest_full_seq(conn_id, dbname):
+    r = db.q("SELECT full_seq FROM runs WHERE connection_id=? AND db=? AND type='full' AND status='success' "
+             "AND full_seq IS NOT NULL ORDER BY started DESC LIMIT 1", (conn_id, dbname))
+    return r[0]["full_seq"] if r else None
+
+
+def _base_full_seq(cfg, conn_id, dbname, log):
+    """Number of the full a new differential will really be based on: the server's newest non-copy-only full."""
+    try:
+        rows = sql_rows(cfg, "SELECT TOP 1 CAST(bs.backup_set_uuid AS NVARCHAR(40)) AS g FROM msdb.dbo.backupset bs "
+                             f"WHERE bs.database_name={ql(dbname)} AND bs.type='D' AND bs.is_copy_only=0 "
+                             "ORDER BY bs.backup_finish_date DESC")
+        if rows:
+            r = db.q("SELECT full_seq FROM runs WHERE connection_id=? AND db=? AND type='full' AND set_guid=? "
+                     "AND full_seq IS NOT NULL", (conn_id, dbname, rows[0]["g"].lower()))
+            if r:
+                return r[0]["full_seq"]
+    except Exception as e:  # noqa: BLE001 - no msdb access: fall back to our newest full
+        log(f"تعذر تحديد أساس التفاضلية من msdb ({e})؛ يُستخدم آخر Full من اللوحة")
+    return _latest_full_seq(conn_id, dbname)
+
+
 def last_full_is_foreign(cfg, dbname):
     """True when the newest non-copy-only full on the server was not written by the panel (another tool or a manual
     backup). Such a full becomes the base of every later differential, which then cannot be restored from our files."""
@@ -282,13 +304,33 @@ def _execute(rid, conn_id, dbname, btype, dest_ids, verify, retention):
                             "حتى تبقى السلسلة قابلة للاسترجاع")
                 except Exception as e:  # noqa: BLE001 - e.g. no read access to msdb; carry on with a differential
                     log(f"تعذر فحص آخر Full ({e}); المتابعة بتفاضلية")
+            # chain numbering: every full gets a permanent number F000123; differentials/logs carry the number of
+            # the full they depend on plus their own counter inside that chain (D00001 / L00001)
+            fseq = dseq = None
+            if btype == "full":
+                start = db.q("SELECT COUNT(*) AS n FROM runs WHERE connection_id=? AND db=? AND type='full' AND id<>?",
+                             (conn_id, dbname, rid))[0]["n"] + 1  # first number = previous fulls + 1
+                fseq = db.next_seq(f"full:{conn_id}:{dbname}", start)
+            elif btype in ("diff", "log") and cfg["type"] == "sqlserver":
+                fseq = (_base_full_seq(cfg, conn_id, dbname, log) if btype == "diff"
+                        else _latest_full_seq(conn_id, dbname))
+                if fseq:
+                    dseq = db.next_seq(f"{btype}:{conn_id}:{dbname}:{fseq}")
+            tag = (f"_F{fseq:06d}" if fseq else "") + (f"_{'D' if btype == 'diff' else 'L'}{dseq:05d}" if dseq else "")
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            rel = f"{safe(dbname)}/{safe(dbname)}_{btype}_{stamp}{EXT.get(cfg['type'], '.bak')}"
+            rel = f"{safe(dbname)}/{safe(dbname)}_{btype}{tag}_{stamp}{EXT.get(cfg['type'], '.bak')}"
             path = base_dir / rel
             log(f"بدء نسخة {btype} للقاعدة {dbname}")
             do_backup(cfg, dbname, btype, path, log)
             size = path.stat().st_size
-            db.x("UPDATE runs SET file=?, size=? WHERE id=?", (str(path), size, rid))
+            guid = None
+            if btype == "full" and cfg["type"] == "sqlserver":
+                try:  # remember the backup-set GUID so later differentials can be matched to this full
+                    guid = str(sql_rows(cfg, f"RESTORE HEADERONLY FROM DISK={ql(path)}")[0]["BackupSetGUID"]).lower()
+                except Exception as e:  # noqa: BLE001
+                    log(f"تعذر قراءة GUID النسخة: {e}")
+            db.x("UPDATE runs SET file=?, size=?, full_seq=?, seq_no=?, set_guid=? WHERE id=?",
+                 (str(path), size, fseq, dseq or 0, guid, rid))
             log(f"اكتمل النسخ: {size / 1048576:.1f} MB")
             if verify:
                 log("التحقق من سلامة النسخة...")

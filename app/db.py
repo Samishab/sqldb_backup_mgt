@@ -61,6 +61,11 @@ def init():
         started TEXT, finished TEXT, size INTEGER DEFAULT 0, file TEXT, verified INTEGER DEFAULT 0,
         uploads TEXT DEFAULT '[]', error TEXT, log TEXT DEFAULT '', deleted INTEGER DEFAULT 0)""")
     x("CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT)")
+    x("CREATE TABLE IF NOT EXISTS seq(k TEXT PRIMARY KEY, v INTEGER)")
+    have = {r["name"] for r in q("PRAGMA table_info(runs)")}
+    for col, typ in (("full_seq", "INTEGER"), ("seq_no", "INTEGER"), ("set_guid", "TEXT")):
+        if col not in have:
+            x(f"ALTER TABLE runs ADD COLUMN {col} {typ}")
     x("CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, action TEXT, detail TEXT)")
     # a server restart kills in-flight jobs
     x("UPDATE runs SET status='failed', error='توقف الخدمة أثناء التنفيذ', finished=? WHERE status='running'", (now(),))
@@ -94,6 +99,11 @@ def save_item(kind, id_, body):
 
 def delete_item(kind, id_):
     x(f"DELETE FROM {kind} WHERE id=?", (id_,))
+
+
+def next_seq(key, start=1):
+    """Atomic persistent counter: returns `start` the first time, then +1 on every call. Never resets."""
+    return q("INSERT INTO seq(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=v+1 RETURNING v", (key, start))[0]["v"]
 
 
 # ---- settings / audit ----

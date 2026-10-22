@@ -193,7 +193,7 @@ def backup_now(body: dict = Body(...)):
 
 @app.get("/api/runs")
 def runs(limit: int = 200, status: str = "", db_name: str = "", rtype: str = ""):
-    sql, args = "SELECT id,schedule_name,connection_id,db,type,trigger,status,started,finished,size,file,verified,uploads,error,deleted FROM runs WHERE 1=1", []
+    sql, args = "SELECT id,schedule_name,connection_id,db,type,trigger,status,started,finished,size,file,verified,uploads,error,deleted,full_seq,seq_no FROM runs WHERE 1=1", []
     for col, val in (("status", status), ("db", db_name), ("type", rtype)):
         if val:
             sql += f" AND {col}=?"; args.append(val)
